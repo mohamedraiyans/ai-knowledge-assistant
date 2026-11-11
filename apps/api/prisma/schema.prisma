@@ -1,0 +1,141 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum ProviderName {
+  GROQ
+  AZURE_OPENAI
+  ANTHROPIC
+}
+
+model User {
+  id             String               @id @default(uuid())
+  email          String               @unique
+  name           String?
+  avatarUrl      String?
+  role           Role                 @default(USER)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  refreshTokens  RefreshToken[]
+  providerKeys   ProviderCredential[]
+  documents      Document[]
+  featureChanges FeatureFlag[]
+  settingChanges Setting[]
+  invitesSent    AllowedEmail[]
+  evalRuns       EvalRun[]
+}
+
+// Admin-controlled switches for optional features. A missing row means the
+// feature's registry default applies (see apps/api/src/features/feature-registry.ts).
+model FeatureFlag {
+  key       String   @id
+  enabled   Boolean
+  updatedBy String?
+  updater   User?    @relation(fields: [updatedBy], references: [id], onDelete: SetNull)
+  updatedAt DateTime @updatedAt
+}
+
+// Admin-editable values (branding, prompts, retrieval knobs...). Only overrides are
+// stored: a missing row means the registry default applies
+// (see apps/api/src/settings/settings-registry.ts).
+model Setting {
+  key       String   @id
+  value     Json
+  updatedBy String?
+  updater   User?    @relation(fields: [updatedBy], references: [id], onDelete: SetNull)
+  updatedAt DateTime @updatedAt
+}
+
+// An email an admin has pre-approved to sign in, with the role it will get.
+model AllowedEmail {
+  email     String   @id
+  role      Role     @default(USER)
+  invitedBy String?
+  inviter   User?    @relation(fields: [invitedBy], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+}
+
+model Document {
+  id         String   @id @default(uuid())
+  filename   String   @unique
+  chunkCount Int
+  uploadedBy String?
+  uploader   User?    @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model ProviderCredential {
+  id             String       @id @default(uuid())
+  provider       ProviderName
+  label          String
+  encryptedValue String
+  extraConfig    Json?
+  isActive       Boolean      @default(true)
+  createdBy      String?
+  creator        User?        @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([provider])
+}
+
+// One row per LLM call, written by a LangChain callback handler. Powers the admin
+// usage/latency view without depending on any external tracing service.
+model LlmCall {
+  id           String       @id @default(uuid())
+  provider     ProviderName
+  model        String?
+  purpose      String // chat | graph-extraction | eval-answer | eval-judge
+  latencyMs    Int
+  inputTokens  Int?
+  outputTokens Int?
+  ok           Boolean
+  error        String?
+  createdAt    DateTime     @default(now())
+
+  @@index([createdAt])
+  @@index([purpose])
+}
+
+// A question with a reference answer, used to measure answer quality over time.
+model EvalCase {
+  id        String   @id @default(uuid())
+  question  String
+  expected  String
+  createdAt DateTime @default(now())
+}
+
+model EvalRun {
+  id           String       @id @default(uuid())
+  provider     ProviderName
+  total        Int
+  correct      Int
+  grounded     Int
+  avgLatencyMs Int
+  results      Json
+  createdBy    String?
+  creator      User?        @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  createdAt    DateTime     @default(now())
+}

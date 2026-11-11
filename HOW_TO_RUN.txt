@@ -1,0 +1,120 @@
+====================================================================
+ HOW TO RUN AI KNOWLEDGE ASSISTANT  (read top to bottom, in order)
+====================================================================
+
+What runs:
+  Postgres   users, settings, provider keys, traces, evaluation       :5432
+  Redis      answer cache, popular + recent questions                 :6379
+  Chroma     vector database for document passages                    :8000
+  Neo4j      knowledge graph for GraphRAG (optional)    UI :7474      :7687
+  Adminer    Postgres web UI                                          :8081
+  api        NestJS backend                                           :4000
+  web        Next.js frontend                                         :3000
+
+--------------------------------------------------------------------
+ PART A. One-time setup
+--------------------------------------------------------------------
+ 1. Install Node 24 and Docker Desktop.
+
+ 2. Install dependencies (also generates the Prisma client):
+        npm install
+
+ 3. Create your env file:
+        copy .env.example .env
+    Then fill in the REPLACE_ME values:
+      - JWT_ACCESS_SECRET and CREDENTIALS_ENCRYPTION_KEY: the generator
+        commands are written in the comments of .env.example.
+      - GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET: create a Web OAuth client
+        at console.cloud.google.com and add the redirect URI
+        http://localhost:4000/auth/google/callback
+    ADMIN_EMAILS is optional: the first person to sign in becomes admin.
+
+ 4. Start the backing services:
+        docker compose up -d
+
+ 5. Create the database tables:
+        cd apps/api
+        npx prisma migrate deploy
+
+--------------------------------------------------------------------
+ PART B. Every session
+--------------------------------------------------------------------
+        docker compose up -d
+        npx turbo run dev
+  Open http://localhost:3000 and sign in with Google.
+
+--------------------------------------------------------------------
+ PART C. First run: set it up from the Admin area (no code edits)
+--------------------------------------------------------------------
+ 1. The first account to sign in is the admin. Click "Admin".
+ 2. Models & prompt -> Add a provider key (Groq, Azure OpenAI or
+    Anthropic). The key is encrypted before storage and never shown
+    again. Fill in the model, press "Test connection".
+ 3. General -> set the app name, accent colour and who may sign in
+    ("invite-only" or "open").
+ 4. Users -> invite teammates by email.
+ 5. Back in the app, drop a .txt / .pdf / .docx file into the sidebar and
+    ask questions. Try samples/graphrag/ for a ready-made two-document
+    example, then ask:
+      "Which technologies are used by projects that Northwind Analytics
+       people worked on?"
+    The answer shows a "Knowledge graph" row listing the connected facts
+    that were used.
+
+--------------------------------------------------------------------
+ PART D. The whole stack in Docker (api + web too)
+--------------------------------------------------------------------
+        docker compose --profile app up -d --build
+  The api container applies migrations on start. The first build takes
+  several minutes. If you serve it from a real domain, set
+  PUBLIC_API_URL in .env before building, because the browser address
+  of the api is compiled into the web bundle.
+
+--------------------------------------------------------------------
+ PART E. Seeing the knowledge graph
+--------------------------------------------------------------------
+  Neo4j Browser: http://localhost:7474   (user neo4j, password =
+  NEO4J_PASSWORD in .env). Run:
+        MATCH (a)-[r]->(b) RETURN a,b,r
+  This shows every entity and relationship, from every document.
+    (a)       any node (a person, company, project...)
+    -[r]->    a relationship, an arrow from a to b
+    (b)       the node the arrow points to
+  One file only:
+        MATCH (a)-[r {source:'team-directory.txt'}]->(b) RETURN a,b,r
+  Click the "Entity" label in the right panel and set the caption to
+  "name" so nodes show names.
+
+--------------------------------------------------------------------
+ PART F. Checks
+--------------------------------------------------------------------
+  Type-check:    cd apps/api && npx tsc --noEmit
+                 cd apps/web && npx tsc --noEmit
+  Unit tests:    cd apps/api && npx jest
+                 (no Docker, network or API key needed)
+
+--------------------------------------------------------------------
+ PART G. Known gotchas
+--------------------------------------------------------------------
+  * "exports is not defined in ES module scope" when the api starts:
+    apps/api/generated/package.json is missing. Run
+        cd apps/api && npm run prisma:generate
+    (npm install does this automatically).
+  * "address already in use :::3000 / :::4000": an old dev server is still
+    running. Stop it (Task Manager -> node.exe, or
+    taskkill /PID <pid> /F) and start again.
+  * nest start --watch crashing with "taskkill ... failed" on Windows is
+    nest-cli racing its own restart. Run "npm run dev" in apps/api again.
+  * prisma migrate dev can hang in a non-interactive shell. Run it in your
+    own terminal, or use `prisma migrate deploy` for existing migrations.
+  * Answers look stale after changing a document, the model or a prompt
+    setting: they should not. Those changes clear the answer cache. If a
+    cached answer persists, flush it:
+        docker compose exec redis redis-cli FLUSHDB
+  * Reasoning models (gpt-oss) can return an empty reply when "Maximum
+    answer length" is very low, because thinking uses the same budget.
+    Raise it under Admin -> Models & prompt.
+  * Low on RAM? Neo4j is capped (about 0.6 GB). To work without the graph,
+    turn it off under Admin -> Features, or stop it:
+        docker compose stop neo4j
+    The assistant keeps working as plain RAG.

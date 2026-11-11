@@ -1,0 +1,89 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { ChatGroq } from '@langchain/groq';
+import { AzureChatOpenAI } from '@langchain/openai';
+import { ChatAnthropic } from '@langchain/anthropic';
+import type { ProviderName } from '@slm/shared-types';
+import { ProviderUsageService } from '../providers/provider-usage.service';
+import { ProvidersService } from '../providers/providers.service';
+import { SettingsService } from '../settings/settings.service';
+
+export interface BuildOptions {
+  /**
+   * Override the admin's answer-length setting. Callers needing structured output must
+   * raise it: reasoning models (e.g. gpt-oss) spend this budget on thinking first, and
+   * a small cap leaves the visible reply empty.
+   */
+  maxTokens?: number;
+  /** Override the admin's temperature, e.g. 0 for extraction and grading. */
+  temperature?: number;
+}
+
+@Injectable()
+export class ProviderFactory {
+  constructor(
+    private readonly providersService: ProvidersService,
+    private readonly providerUsage: ProviderUsageService,
+    private readonly settings: SettingsService,
+  ) {}
+
+  /**
+   * Wraps global fetch so every real call to a provider's API also records
+   * its rate-limit headers, without LangChain's own invoke() surfacing them.
+   */
+  private usageTrackingFetch(provider: ProviderName): typeof fetch {
+    return async (...args: Parameters<typeof fetch>) => {
+      const response = await globalThis.fetch(...args);
+      this.providerUsage.record(provider, response.headers);
+      return response;
+    };
+  }
+
+  /**
+   * Builds a chat model for the provider using the admin-configured model, temperature
+   * and length. Everything above this call is written once, regardless of provider.
+   */
+  async build(provider: ProviderName, options: BuildOptions = {}): Promise<BaseChatModel> {
+    const credential = await this.providersService.getDecryptedActiveCredential(provider);
+    if (!credential) {
+      throw new NotFoundException(
+        `No active ${provider} key configured. An admin needs to add one under Provider Keys.`,
+      );
+    }
+
+    const temperature =
+      options.temperature ?? (await this.settings.getNumber('chat.temperature'));
+    const maxTokens = options.maxTokens ?? (await this.settings.getNumber('chat.maxTokens'));
+
+    switch (provider) {
+      case 'GROQ':
+        return new ChatGroq({
+          apiKey: credential.apiKey,
+          model: (credential.extraConfig?.model as string) ?? 'openai/gpt-oss-120b',
+          temperature,
+          maxTokens,
+          fetch: this.usageTrackingFetch(provider),
+        });
+      case 'AZURE_OPENAI':
+        return new AzureChatOpenAI({
+          azureOpenAIApiKey: credential.apiKey,
+          azureOpenAIApiInstanceName: credential.extraConfig?.instanceName as string,
+          azureOpenAIApiDeploymentName: credential.extraConfig?.deploymentName as string,
+          azureOpenAIApiVersion: (credential.extraConfig?.apiVersion as string) ?? '2024-10-21',
+          temperature,
+          maxTokens,
+          configuration: { fetch: this.usageTrackingFetch(provider) },
+        });
+      case 'ANTHROPIC':
+        return new ChatAnthropic({
+          apiKey: credential.apiKey,
+          model: (credential.extraConfig?.model as string) ?? 'claude-3-5-haiku-latest',
+          temperature,
+          maxTokens,
+          clientOptions: { fetch: this.usageTrackingFetch(provider) },
+        });
+      default:
+        throw new NotFoundException(`Unknown provider "${provider}"`);
+    }
+  }
+}

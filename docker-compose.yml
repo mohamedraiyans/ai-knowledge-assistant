@@ -1,0 +1,127 @@
+# Two ways to run this:
+#
+#   docker compose up -d                 the backing services only (Postgres, Redis, Chroma,
+#                                        Neo4j, Adminer). Run the api and web on the host with
+#                                        `npx turbo run dev` for fast iteration.
+#   docker compose --profile app up -d --build
+#                                        everything, including the api and web in containers.
+#
+# Secrets (Google login, JWT, encryption key) come from the .env file at the repo root.
+name: ai-knowledge-assistant
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: slm
+      POSTGRES_PASSWORD: slm
+      POSTGRES_DB: slm
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U slm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Redis holds the answer cache (keys with an expiry), the question ranking and the
+    # recent list (keys without one). volatile-lru under a memory cap evicts only cached
+    # answers when it fills up, never the ranking, which is exactly the wanted behaviour.
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "volatile-lru"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  chroma:
+    image: chromadb/chroma:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma-data:/data
+
+  # Knowledge graph for GraphRAG. Heap and page cache are capped hard so it stays well
+  # under 1 GB on a small laptop (Neo4j sizes itself from total RAM by default).
+  neo4j:
+    image: neo4j:5-community
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-slmgraph123}
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 384m
+      NEO4J_server_memory_pagecache_size: 128m
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j-data:/data
+
+  adminer:
+    image: adminer:latest
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "8081:8080"
+
+  api:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    # The service names below replace the localhost addresses used when running on the host.
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://slm:slm@postgres:5432/slm
+      REDIS_URL: redis://redis:6379
+      CHROMA_URL: http://chroma:8000
+      NEO4J_URI: bolt://neo4j:7687
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    ports:
+      - "4000:4000"
+    volumes:
+      - api-data:/app/apps/api/data
+
+  web:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # What the browser calls. Change it when serving from a real domain.
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:4000}
+    restart: unless-stopped
+    environment:
+      # What the web container itself calls (server-side rendering, session check).
+      INTERNAL_API_URL: http://api:4000
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres-data:
+  redis-data:
+  chroma-data:
+  neo4j-data:
+  api-data:

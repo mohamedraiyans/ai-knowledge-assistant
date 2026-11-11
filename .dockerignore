@@ -1,0 +1,15 @@
+**/node_modules
+**/.next
+**/dist
+**/coverage
+**/.turbo
+.git
+.env
+.env.*
+!.env.example
+apps/api/data
+apps/api/generated
+**/*.log
+**/.claude
+**/.agents
+**/.windsurf

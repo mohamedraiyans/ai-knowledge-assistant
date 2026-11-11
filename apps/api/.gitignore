@@ -1,0 +1,10 @@
+node_modules
+# Keep environment variables out of version control
+.env
+
+/generated/prisma
+
+# Vendored AI-agent skill docs (auto-installed, e.g. by prisma postinstall)
+.agents/
+.claude/
+.windsurf/
