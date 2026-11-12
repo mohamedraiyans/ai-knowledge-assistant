@@ -154,6 +154,13 @@ the real LangGraph flow and the real output parser run. The suites cover the ans
 chunking, settings validation and cache invalidation, feature flags, login admission rules, role and invite rules,
 the tracing handler, the evaluation helpers, and graph parsing and Cypher safety.
 
+GitHub Actions ([.github/workflows/ci.yml](./.github/workflows/ci.yml)) runs the same type-checks and the test
+suite on every push and pull request.
+
+Request bodies are validated with a global `ValidationPipe` (chat messages are capped at 4,000 characters),
+uploads at 20 MB, and the api is rate-limited per IP (120 requests/minute, 20/minute for chat, where every
+request is a paid LLM call).
+
 ## Design decisions
 
 - **Retrieval stays a separate step.** The retrieved passages (with file name and score) are needed on their own for
@@ -176,4 +183,3 @@ the tracing handler, the evaluation helpers, and graph parsing and Cypher safety
 - The graph is viewed in Neo4j Browser; the web app lists the facts used per answer but has no graph screen.
 - Conversation memory is in-process and resets when the api restarts.
 - The api image keeps the full dependency tree so it can run Prisma migrations at start; slimming it is a follow-up.
-- No CI workflow yet. Tests run locally.

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Delete,
   Get,
@@ -16,6 +17,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { RequestUser } from '../auth/types';
 import { DocumentsService } from './documents.service';
 
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+
 @Controller('documents')
 @UseGuards(JwtAuthGuard)
 export class DocumentsController {
@@ -27,8 +30,10 @@ export class DocumentsController {
   }
 
   @Post()
-  @UseInterceptors(FileInterceptor('file'))
-  upload(@UploadedFile() file: Express.Multer.File, @CurrentUser() user: RequestUser) {
+  // Oversized files are rejected by multer itself (413) before reaching the handler.
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_BYTES } }))
+  upload(@UploadedFile() file: Express.Multer.File | undefined, @CurrentUser() user: RequestUser) {
+    if (!file) throw new BadRequestException('No file was uploaded (expected form field "file")');
     return this.documentsService.uploadDocument(file.originalname, file.buffer, user.id);
   }
 

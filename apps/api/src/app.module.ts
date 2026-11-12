@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { join } from 'node:path';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
@@ -22,6 +24,9 @@ import { TracingModule } from './tracing/tracing.module';
       isGlobal: true,
       envFilePath: join(process.cwd(), '..', '..', '.env'),
     }),
+    // Global per-IP ceiling; the chat endpoint sets a tighter @Throttle of its own
+    // because every request there is a paid LLM call.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     RedisModule,
     PrismaModule,
     SettingsModule,
@@ -37,5 +42,6 @@ import { TracingModule } from './tracing/tracing.module';
     FeaturesModule,
     GraphModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

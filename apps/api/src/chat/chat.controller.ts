@@ -1,5 +1,7 @@
 import { Body, Controller, Delete, Get, Post, Query, UseGuards } from '@nestjs/common';
-import type { ChatResponse, FaqEntry, ProviderName } from '@slm/shared-types';
+import { Throttle } from '@nestjs/throttler';
+import type { ChatResponse, FaqEntry } from '@slm/shared-types';
+import { ChatRequestDto } from './dto/chat-request.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -20,9 +22,11 @@ export class ChatController {
     private readonly features: FeaturesService,
   ) {}
 
+  // Tighter than the global default: each chat is an LLM call someone pays for.
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post()
   async chat(
-    @Body() body: { message: string; provider?: ProviderName },
+    @Body() body: ChatRequestDto,
     @CurrentUser() user: RequestUser,
   ): Promise<ChatResponse> {
     const result = await this.chatService.handleChat(user.id, body.message, body.provider ?? 'GROQ');

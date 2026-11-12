@@ -5,7 +5,8 @@ export interface HealthStatus {
 
 export type Role = "ADMIN" | "USER";
 
-export type ProviderName = "GROQ" | "AZURE_OPENAI" | "ANTHROPIC";
+export const PROVIDER_NAMES = ["GROQ", "AZURE_OPENAI", "ANTHROPIC"] as const;
+export type ProviderName = (typeof PROVIDER_NAMES)[number];
 
 export interface AuthUser {
   id: string;
