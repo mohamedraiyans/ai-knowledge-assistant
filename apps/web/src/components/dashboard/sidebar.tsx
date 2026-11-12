@@ -62,14 +62,22 @@ export function Sidebar({ documents, onChanged, onAskQuestion, isAdmin, showQues
     for (const file of Array.from(files)) {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch(`${API_URL}/documents`, {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        setError(body?.message ?? `Failed to upload ${file.name}`);
+      try {
+        const res = await fetch(`${API_URL}/documents`, {
+          method: "POST",
+          credentials: "include",
+          body: formData,
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          setError(body?.message ?? `Failed to upload ${file.name}`);
+        }
+      } catch {
+        // fetch only rejects when no HTTP response arrived at all: wrong origin (CORS),
+        // API down, or the API process died mid-request.
+        setError(
+          `Could not reach the API at ${API_URL} while uploading ${file.name}. Check that it is running and that you opened the app at the origin set in WEB_ORIGIN.`,
+        );
       }
     }
 
