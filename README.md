@@ -154,12 +154,35 @@ the real LangGraph flow and the real output parser run. The suites cover the ans
 chunking, settings validation and cache invalidation, feature flags, login admission rules, role and invite rules,
 the tracing handler, the evaluation helpers, and graph parsing and Cypher safety.
 
-GitHub Actions ([.github/workflows/ci.yml](./.github/workflows/ci.yml)) runs the same type-checks and the test
-suite on every push and pull request.
-
 Request bodies are validated with a global `ValidationPipe` (chat messages are capped at 4,000 characters),
 uploads at 20 MB, and the api is rate-limited per IP (120 requests/minute, 20/minute for chat, where every
 request is a paid LLM call).
+
+## CI/CD
+
+[.github/workflows/ci.yml](./.github/workflows/ci.yml) is a two-stage pipeline:
+
+1. **checks** — on every push and pull request: type-checks both apps (regenerating the Prisma client and the
+   Next.js route types first) and runs the full test suite. Needs no Docker, network or API key, which is what
+   makes the suite CI-friendly.
+2. **publish-images** — on pushes to `main` only, and only after `checks` passes (`needs: checks`, so a commit
+   that fails tests can never become an image): builds the api and web Docker images in parallel from the
+   existing Dockerfiles and pushes them to GitHub Container Registry, tagged `latest` and with the commit SHA.
+   The SHA tag is immutable, so a rollback is redeploying an old tag. Authentication is the workflow's own
+   short-lived `GITHUB_TOKEN` with job-scoped `packages: write` — no stored secrets.
+
+```bash
+docker pull ghcr.io/mohamedraiyans/ai-knowledge-assistant-api:latest
+```
+
+```bash
+docker pull ghcr.io/mohamedraiyans/ai-knowledge-assistant-web:latest
+```
+
+The images carry the application, deliberately not its configuration: running one needs `DATABASE_URL`, Redis
+and the other `.env` values injected at runtime, plus the backing services (`docker-compose.yml` shows the
+wiring). This is continuous *delivery* — every green commit on `main` produces a deployable artifact. A deploy
+job that pulls the images onto a host (`docker compose pull && up -d` over SSH) is the designed next step.
 
 ## Design decisions
 
