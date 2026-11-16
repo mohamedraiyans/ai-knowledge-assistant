@@ -55,7 +55,14 @@ for schema changes. The initial migration was produced without it:
 - Reasoning models (`openai/gpt-oss-120b` on Groq) spend `maxTokens` on thinking first. Anything that needs
   structured output must raise the limit (`ProviderFactory.build(provider, { maxTokens })`) or the visible reply
   is empty. Extraction and grading use 4096 / 2048.
-- On Windows, `nest start --watch` sometimes crashes on its own restart (`taskkill ... failed`). Re-run it.
+- On Windows, `nest start --watch` sometimes crashes on its own restart (`taskkill ... failed`), or compiles
+  ("Found 0 errors") and never opens port 4000. Re-run it, or use `npx nest start` (no watch) in `apps/api`.
+- The embedding model (`Xenova/all-MiniLM-L6-v2`, about 90 MB) downloads lazily inside the api process on the
+  first upload, into `node_modules/@huggingface/transformers/.cache`. An interrupted download leaves a truncated
+  `onnx/model.onnx` and every upload then fails with `Protobuf parsing failed`. Delete the model folder and retry.
+  The browser only sees `Failed to fetch` if the api dies during that download.
+- Graph extraction is fire-and-forget in the api process: a restart mid-job loses it silently. Re-upload the file
+  (`replaceDocument` deletes the file's old facts first, so it is idempotent).
 
 ## Architecture
 

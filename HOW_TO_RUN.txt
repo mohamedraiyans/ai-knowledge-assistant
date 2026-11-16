@@ -42,6 +42,13 @@ What runs:
         docker compose up -d
         npx turbo run dev
   Open http://localhost:3000 and sign in with Google.
+  Use exactly http://localhost:3000 (not 127.0.0.1, not another port):
+  the api only accepts requests from the address in WEB_ORIGIN.
+  If the api does not start (see PART G, "nest start --watch"), run the
+  two servers separately in two terminals:
+        cd apps/api && npx nest start
+        cd apps/web && npm run dev
+  Check both are up:  http://localhost:4000/health  and  http://localhost:3000
 
 --------------------------------------------------------------------
  PART C. First run: set it up from the Admin area (no code edits)
@@ -59,7 +66,21 @@ What runs:
       "Which technologies are used by projects that Northwind Analytics
        people worked on?"
     The answer shows a "Knowledge graph" row listing the connected facts
-    that were used.
+    that were used. A second question that needs two hops through the graph:
+      "In which city is the company headquartered where the Fleet Tracker
+       project manager works?"   (answer: Rotterdam)
+
+    What happens on the first upload:
+      - The embedding model (about 90 MB) downloads once, inside the api
+        process, into node_modules/@huggingface/transformers/.cache. The
+        first upload can take a minute. Later uploads take a second or two.
+        It needs internet access once; do not restart the api during it.
+      - Each upload returns as soon as the passages are stored in Chroma.
+        The knowledge graph is built afterwards, in the background, by the
+        first active provider key. Allow a minute or two, then check the api
+        log for "Graph indexed <file>: N facts". It needs a working provider
+        key (step 2) and the api must stay running: a restart in the middle
+        loses that job, so upload the file again.
 
 --------------------------------------------------------------------
  PART D. The whole stack in Docker (api + web too)
@@ -105,6 +126,25 @@ What runs:
     taskkill /PID <pid> /F) and start again.
   * nest start --watch crashing with "taskkill ... failed" on Windows is
     nest-cli racing its own restart. Run "npm run dev" in apps/api again.
+    A related symptom: the api log shows "Found 0 errors. Watching for file
+    changes." and then nothing, and port 4000 never opens. Stop it and run
+    "npx nest start" in apps/api instead (no auto-reload, but it starts).
+  * The page shows "Failed to fetch", "Could not reach the API", or a chat
+    stays on "Thinking..." forever: the api is not running or not reachable.
+    Check http://localhost:4000/health first. If that works, check that you
+    opened the app at exactly http://localhost:3000 (see WEB_ORIGIN in .env).
+  * Upload fails with "Load model ... model.onnx failed: Protobuf parsing
+    failed": the embedding model download was cut off and left a truncated
+    file (it should be about 90 MB). Stop the api, delete this folder, start
+    the api and upload again:
+        node_modules/@huggingface/transformers/.cache/Xenova/all-MiniLM-L6-v2
+    If the download keeps failing, fetch
+    https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx
+    yourself and save it as onnx/model.onnx inside that folder.
+  * Neo4j shows no nodes after an upload: the background graph build did
+    not finish (api restarted, no provider key, or Features -> "Knowledge
+    graph (GraphRAG)" is off). Fix the cause and upload the file again; replacing a file also
+    replaces its graph facts, so nothing is duplicated.
   * prisma migrate dev can hang in a non-interactive shell. Run it in your
     own terminal, or use `prisma migrate deploy` for existing migrations.
   * Answers look stale after changing a document, the model or a prompt
